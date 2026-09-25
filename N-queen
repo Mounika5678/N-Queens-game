@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>N Queens Challenge</title>
+<style>
+  :root{
+    --bg:#1B1330; --panel:#241A42; --line:#3A2A5C;
+    --gold:#E3B94E; --text:#F2EEFA; --muted:#B6A9D6;
+    --danger:#E35B5B; --safe:#4FBF8A;
+    box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px);
+    padding-bottom:env(safe-area-inset-bottom,0px);
+  }
+  @media (prefers-color-scheme: light){
+    :root:not([data-theme="dark"]){
+      --bg:#F7F4FC; --panel:#FFFFFF; --line:#E1D8F0;
+      --gold:#B8860B; --text:#241A42; --muted:#6B5E8A;
+    }
+  }
+  *{box-sizing:border-box;}
+  html{scroll-padding-top:env(safe-area-inset-top,0px);}
+  body{
+    margin:0; min-height:100%; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    padding:28px 16px 48px;
+  }
+  h1{font-size:clamp(22px,5vw,30px); margin:0 0 4px; letter-spacing:-0.01em;}
+  .sub{color:var(--muted); font-size:14px; margin-bottom:20px; text-align:center; max-width:420px;}
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:18px; width:100%; max-width:460px;
+  }
+  .controls{display:flex; gap:8px; justify-content:center; margin-bottom:16px; flex-wrap:wrap;}
+  .diff-btn{
+    background:transparent; border:1px solid var(--line); color:var(--text);
+    padding:8px 16px; border-radius:8px; font-size:14px; cursor:pointer;
+  }
+  .diff-btn.active{background:var(--gold); color:var(--bg); border-color:var(--gold); font-weight:600;}
+  .stats{display:flex; justify-content:space-between; margin-bottom:14px; font-size:13px; color:var(--muted);}
+  .stats b{color:var(--gold);}
+  .board{
+    display:grid; gap:2px; width:100%; aspect-ratio:1/1;
+    background:var(--line); border-radius:8px; overflow:hidden;
+  }
+  .cell{
+    display:flex; align-items:center; justify-content:center;
+    font-size:clamp(16px,4vw,28px); cursor:pointer; user-select:none;
+    background:var(--panel);
+  }
+  .cell.light{ filter:brightness(1.08); }
+  .cell.conflict{ background:rgba(227,91,91,0.35); }
+  .cell .queen{ transition:transform .15s ease; }
+  .cell:active .queen{ transform:scale(0.85); }
+  .msg{
+    margin-top:14px; text-align:center; font-size:14px; min-height:20px; font-weight:600;
+  }
+  .msg.win{color:var(--safe);}
+  .msg.warn{color:var(--danger);}
+  .actions{display:flex; gap:10px; justify-content:center; margin-top:14px;}
+  .btn{
+    background:var(--gold); color:var(--bg); border:none; padding:10px 20px;
+    border-radius:8px; font-size:14px; font-weight:600; cursor:pointer;
+  }
+  .btn.secondary{background:transparent; border:1px solid var(--line); color:var(--text);}
+</style>
+</head>
+<body>
+  <h1>👑 N Queens Challenge</h1>
+  <p class="sub">Place a queen in every row so that no two queens attack each other — no shared row, column, or diagonal.</p>
+
+  <div class="panel">
+    <div class="controls" id="diffControls"></div>
+    <div class="stats">
+      <span>Queens placed: <b id="placedCount">0</b>/<b id="targetCount">4</b></span>
+      <span id="timer">00:00</span>
+    </div>
+    <div class="board" id="board"></div>
+    <div class="msg" id="msg"></div>
+    <div class="actions">
+      <button class="btn secondary" id="resetBtn">Reset</button>
+      <button class="btn secondary" id="hintBtn">Hint</button>
+    </div>
+  </div>
+
+<script>
+const LEVELS = { Easy: 4, Medium: 6, Hard: 8 };
+let n = 4;
+let queens = new Set(); // "row,col"
+let startTime = null;
+let timerInterval = null;
+
+const boardEl = document.getElementById('board');
+const msgEl = document.getElementById('msg');
+const diffEl = document.getElementById('diffControls');
+const placedEl = document.getElementById('placedCount');
+const targetEl = document.getElementById('targetCount');
+const timerEl = document.getElementById('timer');
+
+function buildDiffButtons(){
+  diffEl.innerHTML = '';
+  Object.entries(LEVELS).forEach(([name, size]) => {
+    const b = document.createElement('button');
+    b.className = 'diff-btn' + (size === n ? ' active' : '');
+    b.textContent = name + ' (' + size + '×' + size + ')';
+    b.onclick = () => { n = size; resetGame(); };
+    diffEl.appendChild(b);
+  });
+}
+
+function key(r,c){ return r + ',' + c; }
+
+function getConflicts(){
+  const conflicts = new Set();
+  const arr = [...queens].map(k => k.split(',').map(Number));
+  for(let i=0;i<arr.length;i++){
+    for(let j=i+1;j<arr.length;j++){
+      const [r1,c1] = arr[i], [r2,c2] = arr[j];
+      if(r1===r2 || c1===c2 || Math.abs(r1-r2)===Math.abs(c1-c2)){
+        conflicts.add(key(r1,c1)); conflicts.add(key(r2,c2));
+      }
+    }
+  }
+  return conflicts;
+}
+
+function render(){
+  boardEl.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
+  boardEl.innerHTML = '';
+  const conflicts = getConflicts();
+  for(let r=0;r<n;r++){
+    for(let c=0;c<n;c++){
+      const cell = document.createElement('div');
+      const isLight = (r+c) % 2 === 0;
+      cell.className = 'cell' + (isLight ? ' light' : '');
+      const k = key(r,c);
+      if(queens.has(k)){
+        cell.innerHTML = '<span class="queen">👑</span>';
+        if(conflicts.has(k)) cell.classList.add('conflict');
+      }
+      cell.onclick = () => toggleQueen(r,c);
+      boardEl.appendChild(cell);
+    }
+  }
+  placedEl.textContent = queens.size;
+  targetEl.textContent = n;
+  checkWin(conflicts);
+}
+
+function toggleQueen(r,c){
+  const k = key(r,c);
+  if(queens.has(k)){ queens.delete(k); }
+  else { queens.add(k); if(!startTime) startTimer(); }
+  render();
+}
+
+function checkWin(conflicts){
+  if(queens.size === n && conflicts.size === 0){
+    msgEl.textContent = '🎉 Solved! All ' + n + ' queens placed safely.';
+    msgEl.className = 'msg win';
+    stopTimer();
+  } else if(conflicts.size > 0){
+    msgEl.textContent = 'Conflict — two queens are attacking each other.';
+    msgEl.className = 'msg warn';
+  } else {
+    msgEl.textContent = '';
+    msgEl.className = 'msg';
+  }
+}
+
+function resetGame(){
+  queens.clear();
+  stopTimer();
+  startTime = null;
+  timerEl.textContent = '00:00';
+  buildDiffButtons();
+  render();
+}
+
+function startTimer(){
+  startTime = Date.now();
+  timerInterval = setInterval(() => {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const m = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const s = String(elapsed%60).padStart(2,'0');
+    timerEl.textContent = `${m}:${s}`;
+  }, 1000);
+}
+function stopTimer(){ if(timerInterval){ clearInterval(timerInterval); timerInterval = null; } }
+
+// Solve via backtracking to give a hint (first valid full solution consistent with current queens where possible; falls back to a fresh solution)
+function solveNQueens(size){
+  const cols = new Set(), diag1 = new Set(), diag2 = new Set();
+  const rows = [];
+  function backtrack(row){
+    if(row === size) return true;
+    for(let col=0; col<size; col++){
+      if(cols.has(col) || diag1.has(row-col) || diag2.has(row+col)) continue;
+      cols.add(col); diag1.add(row-col); diag2.add(row+col);
+      rows.push(col);
+      if(backtrack(row+1)) return true;
+      cols.delete(col); diag1.delete(row-col); diag2.delete(row+col);
+      rows.pop();
+    }
+    return false;
+  }
+  backtrack(0);
+  return rows;
+}
+
+function giveHint(){
+  const solution = solveNQueens(n);
+  for(let r=0;r<n;r++){
+    const k = key(r, solution[r]);
+    if(!queens.has(k)){
+      queens.add(k);
+      if(!startTime) startTimer();
+      render();
+      return;
+    }
+  }
+  msgEl.textContent = 'No more hints — try Reset to explore a different layout.';
+  msgEl.className = 'msg';
+}
+
+document.getElementById('resetBtn').onclick = resetGame;
+document.getElementById('hintBtn').onclick = giveHint;
+
+buildDiffButtons();
+render();
+</script>
+</body>
+</html>
